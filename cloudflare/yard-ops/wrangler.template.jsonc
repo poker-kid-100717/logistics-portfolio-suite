@@ -11,7 +11,7 @@
     "LTL_BASE_URL": "https://__LTL_HOST__/"
   },
   "assets": {
-    "directory": "../../../apps/yard-ops/web/dist/web/browser",
+    "directory": "../../apps/yard-ops/web/dist/web/browser",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health", "/health/*"]
@@ -19,7 +19,7 @@
   "containers": [
     {
       "class_name": "YardApi",
-      "image": "../../../apps/yard-ops/api/Dockerfile",
+      "image": "../../apps/yard-ops/api/Dockerfile",
       "max_instances": 1,
       "instance_type": "basic"
     }
@@ -32,5 +32,6 @@
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["YardApi"] }
   ],
+  "secrets": { "required": ["YARD_LTL_SIGNING_KEY"] },
   "observability": { "enabled": true }
 }

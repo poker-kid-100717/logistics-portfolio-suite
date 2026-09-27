@@ -90,7 +90,7 @@ The adapter requests a server-side bearer token and uses the public read endpoin
 
 ## Cloudflare production hosting
 
-The suite can deploy all three applications to Cloudflare Workers + Containers with one command.
+Cloudflare deployment is built into GitHub Actions. You do **not** need to run a setup or deployment script locally.
 
 Default production hosts:
 
@@ -100,7 +100,7 @@ ltl.<your-domain>
 yard.<your-domain>
 ```
 
-Each hostname serves the Angular SPA at the edge and forwards `/api/*` plus health routes to that application's .NET 10 Cloudflare Container.
+Each hostname serves the Angular SPA at Cloudflare's edge and forwards `/api/*` plus health routes to that application's .NET 10 Cloudflare Container.
 
 Yard keeps its production service-to-service relationship with LTL:
 
@@ -112,20 +112,22 @@ Yard Worker / Container
         +--> signed Yard events -> LTL integration endpoint
 ```
 
-### One-time GitHub / Cloudflare bootstrap
+### One-time GitHub configuration
 
-Configure the repository domain and generate the shared Yard/LTL signing secret:
-
-```bash
-bash scripts/setup-cloudflare-github.sh example.com
-```
-
-Then add the two required GitHub repository secrets:
+Add these **repository secrets** in GitHub:
 
 ```text
 CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
+
+Recommended for a stable Yard ↔ LTL HMAC key:
+
+```text
+YARD_LTL_SIGNING_KEY
+```
+
+If the signing-key secret is omitted, the deployment action generates a shared key for that deployment and installs it on both services.
 
 Optional secrets for live, read-only Alvys integration:
 
@@ -134,30 +136,54 @@ ALVYS_CLIENT_ID
 ALVYS_CLIENT_SECRET
 ```
 
-The GitHub Actions deployment skips safely until the Cloudflare account ID, token, and `PORTFOLIO_DOMAIN` variable are configured.
+For automatic deploys on every push to `main`, add this repository variable:
 
-### Manual deployment
-
-You can also deploy the entire suite locally:
-
-```bash
-export CLOUDFLARE_API_TOKEN="..."
-export CLOUDFLARE_ACCOUNT_ID="..."
-bash scripts/deploy-cloudflare.sh example.com
+```text
+PORTFOLIO_DOMAIN=example.com
 ```
 
-The deployment script:
+Optional hostname overrides:
+
+```text
+FREIGHT_HOST
+LTL_HOST
+YARD_HOST
+```
+
+### First deployment from the GitHub UI
+
+1. Open **Actions**.
+2. Select **deploy-cloudflare-suite**.
+3. Choose **Run workflow**.
+4. Enter your base domain, such as `example.com`.
+5. Run it.
+
+The domain entered in the UI overrides `PORTFOLIO_DOMAIN` for that run, so the first manual deployment does not require the repository variable.
+
+The workflow calls the repository's composite action at:
+
+```text
+.github/actions/deploy-logistics-suite/action.yml
+```
+
+That action:
 
 1. builds all three Angular applications;
-2. installs the three Worker runtimes;
-3. renders each Wrangler configuration with the requested hostnames;
-4. provisions the shared Yard/LTL signing key;
-5. optionally uploads Alvys credentials;
-6. deploys LTL first, then Freight, then Yard;
-7. verifies each production health endpoint and SPA;
-8. exercises the real production Yard -> LTL candidate lookup.
+2. renders each Wrangler configuration with the requested hostnames;
+3. deploys each Worker and .NET Container;
+4. uploads Worker secrets alongside code;
+5. keeps the Yard/LTL HMAC key identical on both services;
+6. optionally enables Alvys live-read mode;
+7. deploys LTL before Yard;
+8. smoke-tests all three production applications;
+9. exercises the real production Yard → LTL candidate lookup;
+10. writes the deployed URLs to the GitHub Actions job summary.
 
-Wrangler custom-domain configuration creates/updates the Cloudflare Worker hostnames during deployment, so separate manual host creation is not required when the token has the appropriate permissions.
+Cloudflare Custom Domains are declared in the Wrangler templates, making those files the infrastructure source of truth.
+
+### Optional local deployment
+
+`scripts/deploy-cloudflare.sh` remains as a developer fallback, but it is not required for normal setup or deployment.
 
 ## Repository structure
 

@@ -20,7 +20,6 @@ jobs:
       - name: Validate deployment scripts
         run: |
           bash -n scripts/deploy-cloudflare.sh
-          bash -n scripts/setup-cloudflare-github.sh
 
   backend:
     name: .NET 10 APIs and tests
@@ -84,3 +83,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker compose config --quiet
+
+
+  cloudflare-action:
+    name: Cloudflare composite action dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/deploy-logistics-suite
+        with:
+          domain: portfolio.example.com
+          cloudflare-api-token: dry-run
+          cloudflare-account-id: dry-run
+          yard-ltl-signing-key: dry-run-yard-ltl-signing-key
+          validate-only: "true"

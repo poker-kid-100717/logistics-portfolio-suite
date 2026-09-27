@@ -8,7 +8,7 @@
     { "pattern": "__FREIGHT_HOST__", "custom_domain": true }
   ],
   "assets": {
-    "directory": "../../../apps/freight-ops/web/dist/web/browser",
+    "directory": "../../apps/freight-ops/web/dist/web/browser",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health", "/health/*"]
@@ -16,7 +16,7 @@
   "containers": [
     {
       "class_name": "FreightApi",
-      "image": "../../../apps/freight-ops/api/Dockerfile",
+      "image": "../../apps/freight-ops/api/Dockerfile",
       "max_instances": 1,
       "instance_type": "basic"
     }
