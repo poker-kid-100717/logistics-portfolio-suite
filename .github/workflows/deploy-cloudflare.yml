@@ -22,7 +22,23 @@ jobs:
         with:
           node-version: '24.15.0'
 
+      - name: Check deployment configuration
+        id: config
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PORTFOLIO_DOMAIN: ${{ vars.PORTFOLIO_DOMAIN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$PORTFOLIO_DOMAIN" ]; then
+            echo "::notice::Cloudflare deployment is not configured yet; skipping deploy."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy all three applications
+        if: steps.config.outputs.ready == 'true'
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
