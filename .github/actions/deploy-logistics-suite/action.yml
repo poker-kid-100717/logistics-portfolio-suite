@@ -1,0 +1,212 @@
+name: Deploy Logistics Portfolio Suite
+description: Build and deploy Freight Ops, LTL Planner, and Yard Ops to Cloudflare Workers + Containers.
+
+inputs:
+  domain:
+    description: Base domain, for example example.com
+    required: true
+  cloudflare-api-token:
+    description: Cloudflare API token
+    required: true
+  cloudflare-account-id:
+    description: Cloudflare account ID
+    required: true
+  freight-host:
+    description: Optional Freight hostname override
+    required: false
+    default: ""
+  ltl-host:
+    description: Optional LTL hostname override
+    required: false
+    default: ""
+  yard-host:
+    description: Optional Yard hostname override
+    required: false
+    default: ""
+  yard-ltl-signing-key:
+    description: Stable shared HMAC key. If omitted, one is generated for this deployment.
+    required: false
+    default: ""
+  alvys-client-id:
+    description: Optional Alvys client ID for live read-only integration
+    required: false
+    default: ""
+  alvys-client-secret:
+    description: Optional Alvys client secret for live read-only integration
+    required: false
+    default: ""
+
+outputs:
+  freight-url:
+    description: Freight Ops production URL
+    value: ${{ steps.deploy.outputs.freight_url }}
+  ltl-url:
+    description: LTL Planner production URL
+    value: ${{ steps.deploy.outputs.ltl_url }}
+  yard-url:
+    description: Yard Ops production URL
+    value: ${{ steps.deploy.outputs.yard_url }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: '24.15.0'
+
+    - name: Build, deploy, and verify suite
+      id: deploy
+      shell: bash
+      env:
+        DOMAIN: ${{ inputs.domain }}
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        FREIGHT_HOST_INPUT: ${{ inputs.freight-host }}
+        LTL_HOST_INPUT: ${{ inputs.ltl-host }}
+        YARD_HOST_INPUT: ${{ inputs.yard-host }}
+        YARD_LTL_SIGNING_KEY_INPUT: ${{ inputs.yard-ltl-signing-key }}
+        ALVYS_CLIENT_ID: ${{ inputs.alvys-client-id }}
+        ALVYS_CLIENT_SECRET: ${{ inputs.alvys-client-secret }}
+      run: |
+        set -euo pipefail
+
+        : "${DOMAIN:?domain is required}"
+        : "${CLOUDFLARE_API_TOKEN:?cloudflare-api-token is required}"
+        : "${CLOUDFLARE_ACCOUNT_ID:?cloudflare-account-id is required}"
+
+        ROOT="$GITHUB_WORKSPACE"
+        FREIGHT_HOST="${FREIGHT_HOST_INPUT:-freight.$DOMAIN}"
+        LTL_HOST="${LTL_HOST_INPUT:-ltl.$DOMAIN}"
+        YARD_HOST="${YARD_HOST_INPUT:-yard.$DOMAIN}"
+
+        if [ -n "${YARD_LTL_SIGNING_KEY_INPUT:-}" ]; then
+          YARD_LTL_SIGNING_KEY="$YARD_LTL_SIGNING_KEY_INPUT"
+        else
+          YARD_LTL_SIGNING_KEY="$(openssl rand -hex 32)"
+          echo "::notice::YARD_LTL_SIGNING_KEY is not configured in GitHub. A per-deployment key was generated and will be installed on both LTL and Yard."
+        fi
+        export YARD_LTL_SIGNING_KEY
+
+        render_config() {
+          app="$1"
+          sed \
+            -e "s|__FREIGHT_HOST__|$FREIGHT_HOST|g" \
+            -e "s|__LTL_HOST__|$LTL_HOST|g" \
+            -e "s|__YARD_HOST__|$YARD_HOST|g" \
+            "$ROOT/cloudflare/$app/wrangler.template.jsonc" \
+            > "$ROOT/cloudflare/$app/wrangler.generated.jsonc"
+        }
+
+        build_web() {
+          app="$1"
+          echo "==> Building $app"
+          npm install --prefix "$ROOT/apps/$app/web"
+          npm run build --prefix "$ROOT/apps/$app/web"
+        }
+
+        prepare_worker() {
+          app="$1"
+          echo "==> Preparing Cloudflare Worker for $app"
+          npm install --prefix "$ROOT/cloudflare/$app"
+          render_config "$app"
+        }
+
+        write_secrets() {
+          app="$1"
+          file="$2"
+          APP="$app" node <<'NODE' > "$file"
+        const app = process.env.APP;
+        const secrets = {};
+
+        if (app === "ltl-planner" || app === "yard-ops") {
+          secrets.YARD_LTL_SIGNING_KEY = process.env.YARD_LTL_SIGNING_KEY;
+        }
+
+        if (process.env.ALVYS_CLIENT_ID && process.env.ALVYS_CLIENT_SECRET) {
+          secrets.ALVYS_CLIENT_ID = process.env.ALVYS_CLIENT_ID;
+          secrets.ALVYS_CLIENT_SECRET = process.env.ALVYS_CLIENT_SECRET;
+        }
+
+        process.stdout.write(JSON.stringify(secrets));
+        NODE
+          chmod 600 "$file"
+        }
+
+        deploy_app() {
+          app="$1"
+          secrets_file="$2"
+          echo "==> Deploying $app"
+          (
+            cd "$ROOT/cloudflare/$app"
+            if [ "$(cat "$secrets_file")" = "{}" ]; then
+              npx wrangler deploy --config wrangler.generated.jsonc
+            else
+              npx wrangler deploy --config wrangler.generated.jsonc --secrets-file "$secrets_file"
+            fi
+          )
+        }
+
+        wait_for() {
+          url="$1"
+          pattern="$2"
+          for attempt in $(seq 1 18); do
+            body="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 --retry-all-errors "$url" 2>/dev/null || true)"
+            if printf '%s' "$body" | grep -q "$pattern"; then
+              return 0
+            fi
+            echo "Waiting for $url (attempt $attempt/18)..."
+            sleep 10
+          done
+          echo "::error::Smoke test failed: $url"
+          return 1
+        }
+
+        for app in freight-ops ltl-planner yard-ops; do
+          build_web "$app"
+          prepare_worker "$app"
+        done
+
+        FREIGHT_SECRETS="$(mktemp)"
+        LTL_SECRETS="$(mktemp)"
+        YARD_SECRETS="$(mktemp)"
+        trap 'rm -f "$FREIGHT_SECRETS" "$LTL_SECRETS" "$YARD_SECRETS"' EXIT
+
+        write_secrets freight-ops "$FREIGHT_SECRETS"
+        write_secrets ltl-planner "$LTL_SECRETS"
+        write_secrets yard-ops "$YARD_SECRETS"
+
+        if [ -n "${ALVYS_CLIENT_ID:-}" ] && [ -n "${ALVYS_CLIENT_SECRET:-}" ]; then
+          echo "Live, read-only Alvys credentials will be installed on all three Workers."
+        else
+          echo "Alvys credentials not provided; deploying all applications in demo mode."
+        fi
+
+        # LTL is deployed before Yard because Yard's runtime configuration points to LTL.
+        deploy_app ltl-planner "$LTL_SECRETS"
+        deploy_app freight-ops "$FREIGHT_SECRETS"
+        deploy_app yard-ops "$YARD_SECRETS"
+
+        echo "==> Verifying production"
+        wait_for "https://$FREIGHT_HOST/health" "Healthy"
+        wait_for "https://$LTL_HOST/health" "Healthy"
+        wait_for "https://$YARD_HOST/health" "Healthy"
+
+        wait_for "https://$FREIGHT_HOST/" "<app-root"
+        wait_for "https://$LTL_HOST/" "<app-root"
+        wait_for "https://$YARD_HOST/" "<app-root"
+
+        # Real cross-service verification: Yard calls LTL using a seeded Yard asset.
+        wait_for "https://$YARD_HOST/api/ltl/candidates/TRL-4101" "\["
+
+        echo "freight_url=https://$FREIGHT_HOST" >> "$GITHUB_OUTPUT"
+        echo "ltl_url=https://$LTL_HOST" >> "$GITHUB_OUTPUT"
+        echo "yard_url=https://$YARD_HOST" >> "$GITHUB_OUTPUT"
+
+        {
+          echo "## Logistics Portfolio deployment"
+          echo
+          echo "- Freight Ops: https://$FREIGHT_HOST"
+          echo "- LTL Planner: https://$LTL_HOST"
+          echo "- Yard Ops: https://$YARD_HOST"
+          echo "- Yard → LTL production integration: verified"
+        } >> "$GITHUB_STEP_SUMMARY"
