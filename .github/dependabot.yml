@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule: { interval: "weekly" }
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: "nuget"
+    directory: "/apps/freight-ops/api"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "nuget"
+    directory: "/apps/ltl-planner/api"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "nuget"
+    directory: "/apps/yard-ops/api"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "npm"
+    directory: "/apps/freight-ops/web"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "npm"
+    directory: "/apps/ltl-planner/web"
+    schedule: { interval: "weekly" }
+  - package-ecosystem: "npm"
+    directory: "/apps/yard-ops/web"
+    schedule: { interval: "weekly" }
