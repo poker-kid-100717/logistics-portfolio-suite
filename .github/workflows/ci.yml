@@ -20,7 +20,6 @@ jobs:
       - name: Validate deployment scripts
         run: |
           bash -n scripts/deploy-cloudflare.sh
-          bash -n scripts/setup-cloudflare-github.sh
 
   backend:
     name: .NET 10 APIs and tests
