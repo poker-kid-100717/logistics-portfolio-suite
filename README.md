@@ -88,6 +88,77 @@ ALVYS_CLIENT_SECRET=...
 
 The adapter requests a server-side bearer token and uses the public read endpoints. This repository intentionally does not perform Alvys writes.
 
+## Cloudflare production hosting
+
+The suite can deploy all three applications to Cloudflare Workers + Containers with one command.
+
+Default production hosts:
+
+```text
+freight.<your-domain>
+ltl.<your-domain>
+yard.<your-domain>
+```
+
+Each hostname serves the Angular SPA at the edge and forwards `/api/*` plus health routes to that application's .NET 10 Cloudflare Container.
+
+Yard keeps its production service-to-service relationship with LTL:
+
+```text
+Yard Worker / Container
+        |
+        +--> https://ltl.<your-domain>/api/integrations/v1/yard/candidates
+        |
+        +--> signed Yard events -> LTL integration endpoint
+```
+
+### One-time GitHub / Cloudflare bootstrap
+
+Configure the repository domain and generate the shared Yard/LTL signing secret:
+
+```bash
+bash scripts/setup-cloudflare-github.sh example.com
+```
+
+Then add the two required GitHub repository secrets:
+
+```text
+CLOUDFLARE_API_TOKEN
+CLOUDFLARE_ACCOUNT_ID
+```
+
+Optional secrets for live, read-only Alvys integration:
+
+```text
+ALVYS_CLIENT_ID
+ALVYS_CLIENT_SECRET
+```
+
+The GitHub Actions deployment skips safely until the Cloudflare account ID, token, and `PORTFOLIO_DOMAIN` variable are configured.
+
+### Manual deployment
+
+You can also deploy the entire suite locally:
+
+```bash
+export CLOUDFLARE_API_TOKEN="..."
+export CLOUDFLARE_ACCOUNT_ID="..."
+bash scripts/deploy-cloudflare.sh example.com
+```
+
+The deployment script:
+
+1. builds all three Angular applications;
+2. installs the three Worker runtimes;
+3. renders each Wrangler configuration with the requested hostnames;
+4. provisions the shared Yard/LTL signing key;
+5. optionally uploads Alvys credentials;
+6. deploys LTL first, then Freight, then Yard;
+7. verifies each production health endpoint and SPA;
+8. exercises the real production Yard -> LTL candidate lookup.
+
+Wrangler custom-domain configuration creates/updates the Cloudflare Worker hostnames during deployment, so separate manual host creation is not required when the token has the appropriate permissions.
+
 ## Repository structure
 
 ```text
