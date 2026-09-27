@@ -47,3 +47,29 @@ The outbox is in-memory in this portfolio build to keep the demo self-contained.
 ## Contract evolution
 
 The Yard/LTL service contract is exposed under `/api/integrations/v1/` and integration events carry `schemaVersion: 1`. LTL rejects unknown schema versions at its edge, keeping version negotiation out of domain logic.
+
+
+## Cloudflare production topology
+
+```text
+                         Cloudflare edge
+                               |
+            +------------------+------------------+
+            |                  |                  |
+            v                  v                  v
+   freight.<domain>     ltl.<domain>       yard.<domain>
+     Worker +             Worker +            Worker +
+   Angular assets       Angular assets      Angular assets
+        |                    ^                  |
+        v                    |                  v
+ Freight .NET          LTL .NET <--------- Yard .NET
+   Container             Container          Container
+                             ^
+                             |
+                    signed / versioned
+                     Yard integration
+```
+
+Each public application has its own deployable Worker and .NET Container. Static Angular assets stay at the edge, while API and health routes are forwarded to the service container.
+
+Yard is configured with the production LTL base URL at deployment time rather than sharing LTL's implementation or persistence layer. The HMAC signing key is stored as a Cloudflare Worker secret in both LTL and Yard.

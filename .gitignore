@@ -7,3 +7,9 @@
 *.user
 *.suo
 .DS_Store
+
+# Generated Cloudflare deployment files / local deployment secret
+cloudflare/**/wrangler.generated.jsonc
+cloudflare/**/node_modules/
+cloudflare/**/package-lock.json
+.cloudflare.local.env
