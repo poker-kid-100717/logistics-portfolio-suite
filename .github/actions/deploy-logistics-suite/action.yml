@@ -35,6 +35,10 @@ inputs:
     description: Optional Alvys client secret for live read-only integration
     required: false
     default: ""
+  validate-only:
+    description: Build and validate the deployment without contacting Cloudflare
+    required: false
+    default: "false"
 
 outputs:
   freight-url:
@@ -67,12 +71,15 @@ runs:
         YARD_LTL_SIGNING_KEY_INPUT: ${{ inputs.yard-ltl-signing-key }}
         ALVYS_CLIENT_ID: ${{ inputs.alvys-client-id }}
         ALVYS_CLIENT_SECRET: ${{ inputs.alvys-client-secret }}
+        VALIDATE_ONLY: ${{ inputs.validate-only }}
       run: |
         set -euo pipefail
 
         : "${DOMAIN:?domain is required}"
-        : "${CLOUDFLARE_API_TOKEN:?cloudflare-api-token is required}"
-        : "${CLOUDFLARE_ACCOUNT_ID:?cloudflare-account-id is required}"
+        if [ "${VALIDATE_ONLY:-false}" != "true" ]; then
+          : "${CLOUDFLARE_API_TOKEN:?cloudflare-api-token is required}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?cloudflare-account-id is required}"
+        fi
 
         ROOT="$GITHUB_WORKSPACE"
         FREIGHT_HOST="${FREIGHT_HOST_INPUT:-freight.$DOMAIN}"
@@ -174,6 +181,29 @@ runs:
         write_secrets freight-ops "$FREIGHT_SECRETS"
         write_secrets ltl-planner "$LTL_SECRETS"
         write_secrets yard-ops "$YARD_SECRETS"
+
+        if [ "${VALIDATE_ONLY:-false}" = "true" ]; then
+          echo "==> Validating Cloudflare deployment with Wrangler dry-runs"
+          for app in freight-ops ltl-planner yard-ops; do
+            case "$app" in
+              freight-ops) secrets_file="$FREIGHT_SECRETS" ;;
+              ltl-planner) secrets_file="$LTL_SECRETS" ;;
+              yard-ops) secrets_file="$YARD_SECRETS" ;;
+            esac
+
+            (
+              cd "$ROOT/cloudflare/$app"
+              outdir="$RUNNER_TEMP/wrangler-$app"
+              if [ "$(cat "$secrets_file")" = "{}" ]; then
+                npx wrangler deploy --dry-run --outdir "$outdir" --config wrangler.generated.jsonc
+              else
+                npx wrangler deploy --dry-run --outdir "$outdir" --config wrangler.generated.jsonc --secrets-file "$secrets_file"
+              fi
+            )
+          done
+          echo "Composite Cloudflare action dry-run passed."
+          exit 0
+        fi
 
         if [ -n "${ALVYS_CLIENT_ID:-}" ] && [ -n "${ALVYS_CLIENT_SECRET:-}" ]; then
           echo "Live, read-only Alvys credentials will be installed on all three Workers."
